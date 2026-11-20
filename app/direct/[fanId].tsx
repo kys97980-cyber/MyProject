@@ -1,7 +1,8 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { MaterialIcons } from "@expo/vector-icons";
 
 import ChatComposer from "@/components/ChatComposer";
 import AuthenticatedImage from "@/components/AuthenticatedImage";
@@ -84,6 +85,16 @@ export default function DirectChatScreen() {
   const [accounts, setAccounts] = useState<Awaited<ReturnType<typeof getAccounts>>>([]);
   const [messageAnchorWidths, setMessageAnchorWidths] = useState<Record<string, number>>({});
   const [serverBaseUrl, setServerBaseUrl] = useState(() => getServerBaseUrlSync());
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+
+  const handleMessageScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setShowScrollToLatest(event.nativeEvent.contentOffset.y > 80);
+  }, []);
+
+  const scrollToLatest = useCallback(() => {
+    setShowScrollToLatest(false);
+    messageListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
 
   useEffect(() => {
     messageCursorRef.current = messageCursor;
@@ -361,6 +372,8 @@ export default function DirectChatScreen() {
         {profileSyncError ? <Text style={styles.loadingText}>{profileSyncError}</Text> : null}
         <FlatList
           ref={messageListRef}
+          onScroll={handleMessageScroll}
+          scrollEventThrottle={16}
           contentContainerStyle={styles.messageList}
           data={newestFirstMessages}
           extraData={profileRenderState}
@@ -432,9 +445,14 @@ export default function DirectChatScreen() {
           }}
           showsVerticalScrollIndicator={false}
         />
+        {showScrollToLatest ? (
+          <Pressable accessibilityLabel="최신 메시지로 이동" accessibilityRole="button" onPress={scrollToLatest} style={styles.scrollToLatestButton}>
+            <MaterialIcons color="#ffffff" name="keyboard-arrow-down" size={23} />
+          </Pressable>
+        ) : null}
         {isBlocked ? (
           <View style={styles.blockedNotice}><Text style={styles.blockedNoticeText}>차단된 회원이라 메시지를 보낼 수 없습니다.</Text></View>
-        ) : <ChatComposer enableUserToken onSend={sendMessage} />}
+        ) : <ChatComposer enableUserToken userTokenDisabled userTokenDisabledNotice="1:1 대화에서는 전체 버튼을 사용할 수 없습니다." onSend={sendMessage} />}
         {readSyncError ? <Text style={styles.readSyncError}>{readSyncError}</Text> : null}
       </View>
       </KeyboardAvoidingView>
@@ -495,6 +513,7 @@ const styles = StyleSheet.create({
   readText: { color: "#7bd7a7", fontSize: 9, fontWeight: "700" },
   emptyText: { color: MUTED, fontSize: 13, paddingTop: 30, textAlign: "center" },
   readSyncError: { color: "#e38b7d", fontSize: 10, paddingBottom: 12, paddingHorizontal: 12, paddingTop: 8, textAlign: "center" },
+  scrollToLatestButton: { alignItems: "center", backgroundColor: ACCENT, borderRadius: 18, bottom: 62, elevation: 4, height: 36, justifyContent: "center", position: "absolute", right: 8, shadowColor: "#000000", shadowOffset: { height: 2, width: 0 }, shadowOpacity: 0.35, shadowRadius: 4, width: 36, zIndex: 5 },
   blockedNotice: { alignItems: "center", borderColor: "#d7b4ad", borderWidth: 1, paddingVertical: 15 },
   blockedNoticeText: { color: "#a3493d", fontSize: 12 },
 });

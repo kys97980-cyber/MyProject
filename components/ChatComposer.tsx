@@ -9,6 +9,8 @@ type ComposerProps = {
   onSend: (payload: { text?: string; imageUris?: string[]; media?: PendingImage[] }) => void | Promise<void>;
   disabled?: boolean;
   enableUserToken?: boolean;
+  userTokenDisabled?: boolean;
+  userTokenDisabledNotice?: string;
 };
 
 export type PendingImage = {
@@ -51,7 +53,7 @@ function getWebFileType(file: File): AttachmentKind | null {
   return null;
 }
 
-export default function ChatComposer({ onSend, disabled = false, enableUserToken = false }: ComposerProps) {
+export default function ChatComposer({ onSend, disabled = false, enableUserToken = false, userTokenDisabled = false, userTokenDisabledNotice = "1:1 대화에서는 전체 버튼을 사용할 수 없습니다." }: ComposerProps) {
   const [draft, setDraft] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [notice, setNotice] = useState("");
@@ -116,6 +118,10 @@ export default function ChatComposer({ onSend, disabled = false, enableUserToken
 
   const toggleUserToken = () => {
     if (!enableUserToken || disabled || sending) return;
+    if (userTokenDisabled) {
+      setNotice(userTokenDisabledNotice);
+      return;
+    }
     const insertedRange = insertedUserTokenRef.current;
     const currentDraft = draftRef.current;
     if (insertedRange && currentDraft.slice(insertedRange.start, insertedRange.end) === USER_TOKEN) {
@@ -359,7 +365,7 @@ export default function ChatComposer({ onSend, disabled = false, enableUserToken
         <Pressable accessibilityLabel="첨부 유형 선택" accessibilityRole="button" disabled={disabled || sending} onPress={() => setPickerVisible(true)} style={[styles.attachButton, (disabled || sending) && styles.disabledControl]}><MaterialIcons color={ACCENT} name="add" size={ACTION_ICON_SIZE} /></Pressable>
         <View style={[styles.inputBox, disabled && styles.disabledInputBox]}>
           {enableUserToken ? (
-            <Pressable accessibilityLabel={userTokenActive ? "전체 사용자 토큰 제거" : "전체 사용자 토큰 삽입"} accessibilityRole="button" accessibilityState={{ checked: userTokenActive }} disabled={disabled || sending} onPress={toggleUserToken} style={[styles.userTokenButton, userTokenActive && styles.userTokenButtonActive, (disabled || sending) && styles.disabledControl]}>
+            <Pressable accessibilityLabel={userTokenDisabled ? "1:1 대화에서는 전체 버튼을 사용할 수 없음" : userTokenActive ? "전체 사용자 토큰 제거" : "전체 사용자 토큰 삽입"} accessibilityRole="button" accessibilityState={{ checked: userTokenActive, disabled: userTokenDisabled || disabled || sending }} disabled={disabled || sending} onPress={toggleUserToken} style={[styles.userTokenButton, userTokenActive && styles.userTokenButtonActive, userTokenDisabled && styles.userTokenButtonUnavailable, (disabled || sending) && styles.disabledControl]}>
               <Text style={styles.userTokenText}>전체</Text>
             </Pressable>
           ) : null}
@@ -391,6 +397,7 @@ const styles = StyleSheet.create({
   disabledInputBox: { borderColor: "#343434" },
   userTokenButton: { alignItems: "center", backgroundColor: "#454545", borderColor: "#747474", borderRadius: 8, borderWidth: 1, height: 28, justifyContent: "center", marginRight: 8, minWidth: 44, paddingHorizontal: 8 },
   userTokenButtonActive: { backgroundColor: ACCENT, borderColor: ACCENT },
+  userTokenButtonUnavailable: { backgroundColor: "#2e2e2e", borderColor: "#555555" },
   userTokenText: { color: "#ffffff", fontSize: 11, fontWeight: "700" },
   composerInput: { color: INK, flex: 1, fontFamily: "GowunDodum", fontSize: 14, maxHeight: 72, minHeight: 36, paddingVertical: 8 },
   disabledInput: { color: "#777777" },

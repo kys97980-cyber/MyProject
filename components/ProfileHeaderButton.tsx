@@ -4,7 +4,7 @@ import ServerProfileImage from "@/components/ServerProfileImage";
 const INK = "#f1f1f1";
 const MUTED = "#8a8a8a";
 const AVATAR_SIZE = 34;
-const IDENTITY_HEIGHT = 34;
+const IDENTITY_HEIGHT = 40;
 
 type ProfileHeaderButtonProps = {
   email: string;
@@ -72,16 +72,15 @@ const styles = StyleSheet.create({
   button: {
     alignItems: "center",
     flexDirection: "row",
-    flexShrink: 1,
-    maxWidth: 156,
-    minWidth: 0,
+    flexShrink: 0,
+    width: 156,
   },
   row: {
     alignItems: "center",
     flexDirection: "row",
     gap: 7,
     height: IDENTITY_HEIGHT,
-    maxWidth: 156,
+    width: 156,
   },
   avatarWrap: {
     height: AVATAR_SIZE,
@@ -127,10 +126,10 @@ const styles = StyleSheet.create({
   },
   textColumn: {
     alignItems: "flex-start",
-    flex: 1,
+    flexShrink: 0,
     height: IDENTITY_HEIGHT,
-    justifyContent: "space-between",
-    minWidth: 0,
+    justifyContent: "flex-start",
+    width: 115,
   },
   name: {
     color: INK,
@@ -138,6 +137,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
     lineHeight: 19,
+    marginBottom: 4,
     maxWidth: 112,
   },
   hint: {

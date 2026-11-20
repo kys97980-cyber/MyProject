@@ -1,6 +1,6 @@
 
 import { router } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -31,7 +31,6 @@ export default function LoginScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCheckingSignup, setIsCheckingSignup] = useState(false);
   const [signupBlockedVisible, setSignupBlockedVisible] = useState(false);
-  const loginButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const handleSignupPress = async () => {
     setError("");
@@ -67,23 +66,6 @@ export default function LoginScreen() {
       setIsSubmitting(false);
     }
   };
-
-  useEffect(() => {
-    if (Platform.OS !== "web") return;
-    const button = loginButtonRef.current;
-    if (!button) return;
-
-    const onNativeClick = (event: MouseEvent) => {
-      event.preventDefault();
-      void handleLogin();
-    };
-
-    button.onclick = onNativeClick;
-
-    return () => {
-      if (button.onclick === onNativeClick) button.onclick = null;
-    };
-  });
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -138,34 +120,23 @@ export default function LoginScreen() {
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
-            {Platform.OS === "web" ? (
-              <button
-                disabled={isSubmitting}
-                id="login-submit"
-                ref={loginButtonRef}
-                style={styles.webPrimaryButton as any}
-                type="button"
-              >
-                {isSubmitting ? "처리 중…" : "로그인"}
-              </button>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                disabled={isSubmitting}
-                onPress={handleLogin}
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  pressed && styles.pressed,
-                  isSubmitting && styles.disabled,
-                ]}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color={PAPER} />
-                ) : (
-                  <Text style={styles.primaryButtonText}>로그인</Text>
-                )}
-              </Pressable>
-            )}
+            <Pressable
+              accessibilityLabel="로그인"
+              accessibilityRole="button"
+              disabled={isSubmitting}
+              onPress={handleLogin}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                pressed && styles.pressed,
+                isSubmitting && styles.disabled,
+              ]}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator color={PAPER} />
+              ) : (
+                <Text style={styles.primaryButtonText}>로그인</Text>
+              )}
+            </Pressable>
 
             <View style={styles.signupRow}>
               <Text style={styles.signupHint}>아직 계정이 없나요?</Text>
@@ -323,7 +294,6 @@ const styles = StyleSheet.create({
   },
   webPrimaryButton: {
     alignSelf: "center",
-    appearance: "none",
     backgroundColor: "#5a5959",
     borderColor: "transparent",
     borderWidth: 0,

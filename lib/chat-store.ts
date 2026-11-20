@@ -46,10 +46,10 @@ function normalizeMessageMedia(message: ChatMessage): ChatMessage {
   };
 }
 
-export async function getMessagesSnapshot(): Promise<{ messages: ChatMessage[]; nextCursor: number }> {
-	const api = await requireMessageApi();
-	  let response: Response;
-		  try { response = await fetch(`${api}/api/messages`, { headers: await getServerAuthHeaders() }); }
+export async function getMessagesSnapshot(signal?: AbortSignal): Promise<{ messages: ChatMessage[]; nextCursor: number }> {
+		const api = await requireMessageApi();
+		  let response: Response;
+			  try { response = await fetch(`${api}/api/messages`, { headers: await getServerAuthHeaders(), signal }); }
 	  catch { throw new Error("PC 서버의 메시지를 불러오지 못했습니다. dm-media-server 연결과 주소를 확인해 주세요."); }
 	  if (!response.ok) throw new Error(`PC 서버 메시지 조회에 실패했습니다. (${response.status})`);
 	  const payload = await response.json() as { messages?: ChatMessage[]; nextCursor?: number };
@@ -57,13 +57,14 @@ export async function getMessagesSnapshot(): Promise<{ messages: ChatMessage[]; 
 	  return { messages, nextCursor: Number.isSafeInteger(payload.nextCursor) ? payload.nextCursor! : messages.reduce((cursor, message) => Math.max(cursor, message.serverSequence ?? 0), 0) };
 }
 
-export async function getOfflineArtistMessageCount(): Promise<number> {
+export async function getOfflineArtistMessageCount(signal?: AbortSignal): Promise<number> {
   const api = await requireMessageApi();
   let response: Response;
   try {
     response = await fetch(`${api}/api/messages/offline-count`, {
       headers: await getServerAuthHeaders(),
       cache: "no-store",
+      signal,
     });
   } catch {
     throw new Error("오프라인 메시지 수를 PC 서버에서 불러오지 못했습니다.");
@@ -79,10 +80,10 @@ export async function getMessages(): Promise<ChatMessage[]> {
   return (await getMessagesSnapshot()).messages;
 }
 
-export async function getNewMessages(afterCursor: number): Promise<{ messages: ChatMessage[]; nextCursor: number }> {
+export async function getNewMessages(afterCursor: number, signal?: AbortSignal): Promise<{ messages: ChatMessage[]; nextCursor: number }> {
   const api = await requireMessageApi();
   let response: Response;
-  try { response = await fetch(`${api}/api/messages/updates?after=${encodeURIComponent(String(afterCursor))}`, { headers: await getServerAuthHeaders() }); }
+	try { response = await fetch(`${api}/api/messages/updates?after=${encodeURIComponent(String(afterCursor))}`, { headers: await getServerAuthHeaders(), signal }); }
   catch { throw new Error("PC 서버의 새 메시지를 불러오지 못했습니다. dm-media-server 연결과 주소를 확인해 주세요."); }
   if (!response.ok) throw new Error(`PC 서버 새 메시지 조회에 실패했습니다. (${response.status})`);
   const payload = await response.json() as { messages?: ChatMessage[]; nextCursor?: number };
@@ -145,16 +146,17 @@ export async function appendMessage(message: ChatMessage): Promise<ChatMessage> 
   return normalizeMessageMedia(payload?.message ?? message);
 }
 
-export async function markMessagesRead(messageIds: string[], readerId: string): Promise<void> {
+export async function markMessagesRead(messageIds: string[], readerId: string, signal?: AbortSignal): Promise<void> {
 	if (!messageIds.length) return;
 	const api = await requireMessageApi();
   let response: Response;
 	  try {
 	    const authHeaders = await getServerAuthHeaders();
 	    response = await fetch(`${api}/api/messages/read`, {
-	      method: "POST",
-	      headers: { "content-type": "application/json", ...authHeaders },
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders },
       body: JSON.stringify({ messageIds, readerId: normalizeReaderId(readerId) }),
+      signal,
     });
   } catch {
     throw new Error("읽음 상태를 PC 서버에 저장하지 못했습니다. 서버 연결을 확인해 주세요.");
@@ -167,7 +169,7 @@ export async function markMessagesRead(messageIds: string[], readerId: string): 
 
 export type MessageReadStatus = { messageId: string; readBy: string[] };
 
-export async function getMessageReadStatuses(messageIds: string[]): Promise<MessageReadStatus[]> {
+export async function getMessageReadStatuses(messageIds: string[], signal?: AbortSignal): Promise<MessageReadStatus[]> {
   const uniqueIds = Array.from(new Set(messageIds.filter((id) => typeof id === "string" && id.length > 0))).slice(-500);
   if (!uniqueIds.length) return [];
   const api = await requireMessageApi();
@@ -177,6 +179,7 @@ export async function getMessageReadStatuses(messageIds: string[]): Promise<Mess
       method: "POST",
       headers: { "content-type": "application/json", ...(await getServerAuthHeaders()) },
       body: JSON.stringify({ messageIds: uniqueIds }),
+      signal,
     });
   } catch {
     throw new Error("메시지 읽음 상태를 PC 서버에서 확인하지 못했습니다. 서버 연결을 확인해 주세요.");

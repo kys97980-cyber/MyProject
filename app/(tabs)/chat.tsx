@@ -1,6 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { BackHandler, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, ToastAndroid, View } from "react-native";
+import { BackHandler, FlatList, KeyboardAvoidingView, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, ToastAndroid, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialIcons } from "@expo/vector-icons";
 
@@ -16,7 +16,6 @@ import {
   appendMessage,
   getDirectMessages,
   getOfflineArtistMessageCount,
-  getMessageReadStatuses,
   getMessages,
   getMessagesSnapshot,
   getNewMessages,
@@ -194,6 +193,16 @@ export default function ChatScreen() {
   const [reloadCount, setReloadCount] = useState(0);
   const [messageAnchorWidths, setMessageAnchorWidths] = useState<Record<string, number>>({});
   const [activeServerBaseUrl, setActiveServerBaseUrl] = useState(() => getServerBaseUrlSync());
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+
+  const handleMessageScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setShowScrollToLatest(event.nativeEvent.contentOffset.y > 80);
+  }, []);
+
+  const scrollToLatest = useCallback(() => {
+    setShowScrollToLatest(false);
+    messageListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
 
   useEffect(() => {
     messageCursorRef.current = messageCursor;
@@ -428,15 +437,54 @@ export default function ChatScreen() {
   useFocusEffect(
     useCallback(() => {
       const cacheKey = messageSnapshotCacheKeyRef.current;
-      if (!account || !snapshotReady || !cacheKey) return;
+      if (!account || account.role !== "artist" || !snapshotReady || !cacheKey) return;
       let active = true;
       const controller = new AbortController();
       let refreshing = false;
-      const refreshMessages = async () => {
+      const refreshArtistGlobalMessages = async () => {
         if (refreshing) return;
         refreshing = true;
         try {
-          const [updates, sessionEmail] = await Promise.all([getNewMessages(messageCursorRef.current, controller.signal), getLocalSession()]);
+          const updates = await getNewMessages(messageCursorRef.current, controller.signal);
+          if (!active) return;
+          const nextCursor = Math.max(messageCursorRef.current, updates.nextCursor);
+          messageCursorRef.current = nextCursor;
+          setMessageCursor(nextCursor);
+          if (updates.messages.length) {
+            const mergedSnapshot = mergeMessageSnapshot(cacheKey, updates.messages, nextCursor);
+            mergeNewMessageMedia(setStableMedia, updates.messages);
+            if (mergedSnapshot) setMessages(mergedSnapshot.messages);
+          } else {
+            advanceMessageSnapshotCursor(cacheKey, nextCursor);
+          }
+          setLoadError("");
+        } catch (error) {
+          if (active) setLoadError(error instanceof Error ? error.message : "서버 메시지를 불러오지 못했습니다.");
+        } finally {
+          refreshing = false;
+        }
+      };
+      void refreshArtistGlobalMessages();
+      const timer = setInterval(() => { void refreshArtistGlobalMessages(); }, 2000);
+      return () => { active = false; controller.abort(); clearInterval(timer); };
+    }, [account?.email, account?.role, snapshotReady]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const cacheKey = messageSnapshotCacheKeyRef.current;
+      if (!account || account.role !== "fan" || !snapshotReady || !cacheKey) return;
+      let active = true;
+      const controller = new AbortController();
+      let refreshing = false;
+      const refreshFanDirectMessages = async () => {
+        if (refreshing) return;
+        refreshing = true;
+        try {
+          const [updates, sessionEmail] = await Promise.all([
+            getNewMessages(messageCursorRef.current, controller.signal),
+            getLocalSession(),
+          ]);
           const remoteMessages = updates.messages;
           if (!remoteMessages.length) {
             if (active) {
@@ -448,8 +496,8 @@ export default function ChatScreen() {
             return;
           }
           const hasActiveSession = Boolean(sessionEmail) && normalizeAccountEmail(sessionEmail!) === normalizeAccountEmail(account.email);
-          const readIds = hasActiveSession && account.role === "fan"
-            ? getUnreadIncomingMessageIds(remoteMessages, account.email, account.role, blockedFans)
+          const readIds = hasActiveSession
+            ? getUnreadIncomingMessageIds(remoteMessages, account.email, "fan", blockedFans)
             : [];
           let nextMessages = remoteMessages;
           let advanceCursor = true;
@@ -483,49 +531,10 @@ export default function ChatScreen() {
           refreshing = false;
         }
       };
-      void refreshMessages();
-      const timer = setInterval(() => { void refreshMessages(); }, 2000);
+      void refreshFanDirectMessages();
+      const timer = setInterval(() => { void refreshFanDirectMessages(); }, 2000);
       return () => { active = false; controller.abort(); clearInterval(timer); };
     }, [account?.email, account?.role, blockedFans, snapshotReady]),
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      if (account?.role !== "fan" || !snapshotReady) return;
-      let active = true;
-      const controller = new AbortController();
-      let refreshing = false;
-      const refreshReadStatuses = async () => {
-        if (refreshing) return;
-        refreshing = true;
-        try {
-          const normalizedEmail = normalizeAccountEmail(account.email);
-          const pendingMessages = messagesRef.current.filter((message) =>
-            message.scope === "direct"
-            && message.senderRole === "fan"
-            && normalizeAccountEmail(message.senderId) === normalizedEmail
-            && !(message.readBy ?? []).some((readerId) => normalizeAccountEmail(readerId) !== normalizedEmail),
-          ).slice(-500);
-          if (!pendingMessages.length) return;
-          const statuses = await getMessageReadStatuses(pendingMessages.map((message) => message.id), controller.signal);
-          if (!active) return;
-          const statusById = new Map(statuses.map((status) => [status.messageId, status.readBy]));
-          const cacheKey = messageSnapshotCacheKeyRef.current;
-          const updatedSnapshot = cacheKey
-            ? mergeMessageSnapshot(cacheKey, messagesRef.current.filter((message) => statusById.has(message.id)).map((message) => ({ ...message, readBy: statusById.get(message.id) })), messageCursorRef.current)
-            : null;
-          if (updatedSnapshot) setMessages(updatedSnapshot.messages);
-          setReadSyncError("");
-        } catch (error) {
-          if (active) setReadSyncError(error instanceof Error ? error.message : "읽음 상태를 확인하지 못했습니다.");
-        } finally {
-          refreshing = false;
-        }
-      };
-      void refreshReadStatuses();
-      const timer = setInterval(() => { void refreshReadStatuses(); }, 2000);
-      return () => { active = false; controller.abort(); clearInterval(timer); };
-    }, [account?.email, account?.role, snapshotReady]),
   );
 
   const isCurrentFanBlocked = Boolean(account?.role === "fan" && isFanBlocked(blockedFans, account.email));
@@ -683,6 +692,8 @@ export default function ChatScreen() {
         {profileSyncError ? <Text style={styles.readSyncError}>{profileSyncError}</Text> : null}
         <FlatList
           ref={messageListRef}
+          onScroll={handleMessageScroll}
+          scrollEventThrottle={16}
           contentContainerStyle={styles.messageList}
           data={newestFirstMessages}
           extraData={profileRenderState}
@@ -734,8 +745,8 @@ export default function ChatScreen() {
                     style={({ pressed }) => [styles.senderButton, pressed && styles.pressed]}
                   >
                     <ServerProfileImage email={item.senderId} initialUri={senderAvatarUri} resizeMode="cover" style={styles.senderAvatar} fallback={<View style={styles.senderAvatarPlaceholder}><Text style={styles.senderAvatarText}>{senderName.slice(0, 1)}</Text></View>} />
-                    <View>
-                      <Text style={styles.senderName}>{senderName}</Text>
+                    <View style={styles.senderCopy}>
+                      <Text ellipsizeMode="tail" numberOfLines={1} style={styles.senderName}>{senderName}</Text>
                       <Text style={styles.directHint}>닉네임을 눌러 개인 대화</Text>
                     </View>
                   </Pressable>
@@ -744,7 +755,7 @@ export default function ChatScreen() {
                   {!isFanReply ? (
                     <View style={styles.identityRow}>
                       <ServerProfileImage email={item.senderId} initialUri={senderAvatarUri} resizeMode="cover" style={styles.senderAvatar} fallback={<View style={styles.senderAvatarPlaceholder}><Text style={styles.senderAvatarText}>{senderName.slice(0, 1)}</Text></View>} />
-                      <Text style={styles.senderName}>{senderName}</Text>
+                      <Text ellipsizeMode="tail" numberOfLines={1} style={styles.senderName}>{senderName}</Text>
                     </View>
                   ) : null}
                   {hasMedia ? (
@@ -810,6 +821,12 @@ export default function ChatScreen() {
           }}
           showsVerticalScrollIndicator={false}
         />
+
+        {showScrollToLatest ? (
+          <Pressable accessibilityLabel="최신 메시지로 이동" accessibilityRole="button" onPress={scrollToLatest} style={styles.scrollToLatestButton}>
+            <MaterialIcons color="#ffffff" name="keyboard-arrow-down" size={23} />
+          </Pressable>
+        ) : null}
 
         {isCurrentFanBlocked ? (
           <View style={styles.blockedNotice}>
@@ -978,13 +995,14 @@ const styles = StyleSheet.create({
   messageContent: { alignItems: "flex-start", maxWidth: "82%" },
   messageContentRight: { alignItems: "flex-end" },
   outgoingTextMessageContent: { width: 240 },
-  senderButton: { alignItems: "center", flexDirection: "row", gap: 7, marginBottom: 10 },
-  identityRow: { alignItems: "center", flexDirection: "row", gap: 7, marginBottom: 10 },
+  senderButton: { alignItems: "center", flexDirection: "row", gap: 7, marginBottom: 10, maxWidth: "82%" },
+  senderCopy: { flexShrink: 0, width: 220 },
+  identityRow: { alignItems: "center", flexDirection: "row", gap: 7, marginBottom: 10, maxWidth: "100%" },
   identityRowRight: { flexDirection: "row-reverse" },
   senderAvatar: { borderRadius: 11, height: 22, width: 22 },
   senderAvatarPlaceholder: { alignItems: "center", backgroundColor: "#d6bb45", borderRadius: 11, height: 22, justifyContent: "center", width: 22 },
   senderAvatarText: { color: "#151515", fontSize: 10, fontWeight: "800" },
-  senderName: { color: ACCENT, fontSize: 12, fontWeight: "700" },
+  senderName: { color: ACCENT, flexShrink: 0, fontSize: 12, fontWeight: "700", maxWidth: 220, width: 220 },
   directHint: { color: MUTED, fontSize: 9, marginTop: 2 },
   bubble: { borderRadius: 16, maxWidth: "82%", paddingHorizontal: 15, paddingVertical: 12 },
   outgoingTextBubble: { maxWidth: "100%" },
@@ -1019,6 +1037,7 @@ const styles = StyleSheet.create({
   offlineCountError: { color: "#a3493d", fontSize: 10, paddingBottom: 8 },
   pressed: { opacity: 0.65 },
   readSyncError: { color: "#e38b7d", fontSize: 10, paddingBottom: 12, paddingHorizontal: 12, paddingTop: 8, textAlign: "center" },
+  scrollToLatestButton: { alignItems: "center", backgroundColor: ACCENT, borderRadius: 18, bottom: 62, elevation: 4, height: 36, justifyContent: "center", position: "absolute", right: 8, shadowColor: "#000000", shadowOffset: { height: 2, width: 0 }, shadowOpacity: 0.35, shadowRadius: 4, width: 36, zIndex: 5 },
   blockedNotice: { alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, width: "100%" },
   blockedNoticeText: { color: "#d18478", fontFamily: "GowunDodum", fontSize: 13, lineHeight: 20, textAlign: "center" },
   modalBackdrop: { backgroundColor: "rgba(25, 24, 23, 0.32)", flex: 1, justifyContent: "flex-end" },
